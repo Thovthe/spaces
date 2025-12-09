@@ -1,6 +1,9 @@
+> **This is a GPL licensed fork of the "Spaces" chrome webextension that is attempting to get it running on Firefox.**
+> @deanoemcke and @codedread amongst others retain copyright to most of the original source code and that code is covered by the original licenses. Any changes in this repo are provided under the terms of the GPLv2.
+
 # <img src="/img/icon48.png" align="absmiddle"> Spaces
 
-### A Chrome extension for Intuitive tab management
+### A webextension for Intuitive tab management
 
 Spaces is a workspace manager for chrome.
 It treats each chrome window like a different workspace and lets you name and save each space.
@@ -28,12 +31,12 @@ Please note that the webstore version may be behind the latest version here.
 
 ### Install as an extension from source
 
-1. Download the **[latest available version](https://github.com/deanoemcke/spaces/archive/v1.1.1.zip)** 
+1. Download the **[latest available version]()** 
 2. Unarchive to your preferred location (e.g., `Downloads`).
 2. In **Google Chrome**, navigate to [chrome://extensions/](chrome://extensions/) and enable <kbd>Developer mode</kbd> in the upper right corner.
 3. Click on the <kbd>LOAD UNPACKED</kbd> button.
 4. Browse to the _root directory_ of the unarchived download, and click <kbd>OPEN</kbd>.
 
 > **TODO** &mdash; add more sections
+> - [ ] Tag first firefox release
 > - [ ] Build from github
-> - [ ] License (currently unspecified)
