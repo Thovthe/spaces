@@ -11,8 +11,17 @@
         "tabs",
         "unlimitedStorage"
     ],
+    "browser_specific_settings": {
+        "gecko": {
+        "id": "spaces@thovthe",
+        "data_collection_permissions": {
+						"required": ["none"]
+            }
+        }
+    },
     "background": {
         "service_worker": "js/background/main.js",
+        "scripts": ["js/background/main.js"],
         "type": "module"
     },
     "action": {
