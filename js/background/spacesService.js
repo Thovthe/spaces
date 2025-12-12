@@ -6,7 +6,7 @@
 
 /** @typedef {import('./dbService.js').Session} Session */
 
-import { dbService } from './dbService.js';
+import { dbService, getSchema, DB_VERSION } from './dbService.js';
 
 // Module-level properties
 const debug = false;
@@ -25,6 +25,7 @@ class SpacesService {
     constructor() {
         this.tabHistoryUrlMap = {};
         this.closedWindowIds = {};
+        this.boundsUpdateTimers = {};
         this.sessionUpdateTimers = {};
         this.historyQueue = [];
         this.eventQueueCount = 0;
@@ -371,6 +372,59 @@ class SpacesService {
     }
 
     /**
+     * Exports the entire database for debugging purposes with anonymized data.
+     * @returns {Promise<Object>} Promise that resolves to an object containing:
+     *   - version: database version
+     *   - schema: database schema
+     *   - sessions: anonymized session data
+     */
+    async exportDatabaseForDebugging() {
+        await this.ensureInitialized();
+
+        const anonymizedSessions = (await dbService.fetchAllSessions()).map((session, index) => {
+            const anonymizedSession = { ...session };
+            if (session.name) anonymizedSession.name = `Space_${index + 1}`;
+            if (session.tabs && Array.isArray(session.tabs)) {
+                anonymizedSession.tabs = session.tabs.map((tab, tabIndex) => 
+                    this._anonymizeTab(tab, tabIndex + 1, 'Tab')
+                );
+            }
+            if (session.history && Array.isArray(session.history)) {
+                anonymizedSession.history = session.history.map((historyTab, historyIndex) => 
+                    this._anonymizeTab(historyTab, historyIndex + 1, 'History Tab')
+                );
+            }
+            return anonymizedSession;
+        });
+
+        return {
+            version: {
+                database: DB_VERSION,
+                extension: await this.fetchLastVersion(),
+                manifest: chrome.runtime.getManifest().version
+            },
+            schema: getSchema(),
+            sessions: anonymizedSessions,
+        };
+    }
+
+    /**
+     * Anonymizes a tab object for debugging export
+     * @private
+     * @param {Object} tab - The tab object to anonymize
+     * @param {number} index - The index number for generating unique placeholder values
+     * @param {string} prefix - The prefix for the title (e.g., 'Tab' or 'History Tab')
+     * @returns {Object} Anonymized tab object
+     */
+    _anonymizeTab(tab, index, prefix) {
+        const anonymizedTab = { ...tab };
+        if (tab.url) anonymizedTab.url = `https://example-${index}.com/path`;
+        if (tab.title) anonymizedTab.title = `${prefix} ${index}`;
+        if (tab.favIconUrl) anonymizedTab.favIconUrl = 'data:anonymized-favicon';
+        return anonymizedTab;
+    }
+
+    /**
      * Find a session by windowId, checking both in-memory sessions and database
      * @param {number} windowId - The window ID to search for
      * @returns {Session|null} The session object if found, null otherwise
@@ -388,7 +442,8 @@ class SpacesService {
      * @returns {Promise<Session|null>} The session object if found, null otherwise
      */
     async _getSessionByWindowIdInternal(windowId) {
-        // First check in-memory sessions (includes temporary sessions)
+        // First check in-memory sessions (includes temporary sessions). During initialization,
+        // this will be the full set of sessions from the database.
         const memorySession = this.sessions.find(session => session.windowId === windowId);
         if (memorySession) {
             return memorySession;
@@ -403,6 +458,50 @@ class SpacesService {
         
         // During initialization, only check what's already loaded in memory
         return null;
+    }
+
+    /**
+     * Captures and stores window bounds for a window with debouncing.
+     * This is called when window bounds change to ensure we have current bounds
+     * without excessive database writes during rapid resize/move operations.
+     *
+     * @param {number} windowId - The ID of the window to capture bounds for
+     * @param {Object} bounds - The window bounds object with left, top, width, height
+     * @returns {Promise<void>}
+     */
+    async captureWindowBounds(windowId, bounds) {
+        await this.ensureInitialized();
+        
+        const session = await this.getSessionByWindowId(windowId);
+        if (session && session.id) {
+            // Update bounds in memory immediately for responsiveness
+            session.windowBounds = {
+                left: bounds.left,
+                top: bounds.top, 
+                width: bounds.width,
+                height: bounds.height
+            };
+            
+            if (debug) {
+                // eslint-disable-next-line no-console
+                console.log(`Captured window bounds for session ${session.id}:`, session.windowBounds);
+            }
+
+            // Debounce database writes to avoid excessive I/O during rapid resize/move
+            clearTimeout(this.boundsUpdateTimers[windowId]);
+            this.boundsUpdateTimers[windowId] = setTimeout(async () => {
+                try {
+                    // Save bounds to database after debounce period
+                    await this._updateSessionSync(session);
+                    if (debug) {
+                        // eslint-disable-next-line no-console
+                        console.log(`Saved window bounds to database for session ${session.id}`);
+                    }
+                } catch (error) {
+                    console.error(`Error saving bounds for session ${session.id}:`, error);
+                }
+            }, 1000); // 1 second debounce - adjust as needed
+        }
     }
 
     // event listener functions for window and tab events
@@ -530,6 +629,7 @@ class SpacesService {
             }
 
             this.closedWindowIds[windowId] = true;
+            clearTimeout(this.boundsUpdateTimers[windowId]);
             clearTimeout(this.sessionUpdateTimers[windowId]);
         }
 
@@ -538,7 +638,7 @@ class SpacesService {
             // if this is a saved session then just remove the windowId reference
             if (session.id) {
                 session.windowId = false;
-                // Persist the cleared windowId to database with sync
+                // Persist the window to database with sync
                 await this._updateSessionSync(session);
 
                 // else if it is temporary session then remove the session from the cache
@@ -856,11 +956,12 @@ class SpacesService {
      * @param {string} sessionName - The name for the new session
      * @param {Array<Object>} tabs - Array of tab objects containing URL and other tab properties
      * @param {number|false} windowId - The window ID to associate with this session, or false for no association
+     * @param {WindowBounds} [windowBounds] - Optional window bounds to save with the session
      * @returns {Promise<Session|null>} Promise that resolves to:
      *   - Session object with id property if successfully created
      *   - null if session creation failed, no tabs were provided, or attempted on already saved session
      */
-    async saveNewSession(sessionName, tabs, windowId) {
+    async saveNewSession(sessionName, tabs, windowId, windowBounds) {
         await this.ensureInitialized();
         
         if (!tabs) {
@@ -909,6 +1010,11 @@ class SpacesService {
         session.sessionHash = sessionHash;
         session.tabs = tabs;
         session.lastAccess = new Date();
+        
+        // Add window bounds if provided
+        if (windowBounds) {
+            session.windowBounds = windowBounds;
+        }
 
         // save session to db - this should only be called on temporary sessions (id: false)
         try {
@@ -1090,16 +1196,16 @@ function cleanUrl(url) {
  * filterInternalWindows({ tabs: [{ url: 'https://example.com' }], type: 'normal' }) // returns false
  */
 function filterInternalWindows(curWindow) {
-    // sanity check to make sure window isnt an internal spaces window
+    // Sanity check to make sure window isn't an internal spaces window.
     if (
         curWindow.tabs.length === 1 &&
-        curWindow.tabs[0].url.indexOf(chrome.runtime.id) >= 0
+        curWindow.tabs[0].url.includes(chrome.runtime.id)
     ) {
         return true;
     }
 
-    // also filter out popup or panel window types
-    if (curWindow.type === 'popup' || curWindow.type === 'panel') {
+    // Also filter out popup, panel, or pwa window types.
+    if (['popup', 'panel', 'app'].includes(curWindow.type)) {
         return true;
     }
     return false;

@@ -3,6 +3,8 @@
 import { getHashVariable } from './common.js';
 import { spacesRenderer } from './spacesRenderer.js';
 import { checkSessionOverwrite, escapeHtml } from './utils.js';
+import * as common from './common.js';
+/** @typedef {common.Space} Space */
 
 const UNSAVED_SESSION = '(unnamed window)';
 const NO_HOTKEY = 'no hotkey set';
@@ -12,27 +14,62 @@ const NO_HOTKEY = 'no hotkey set';
  * @param {string} action The popup action ('switch' or 'move')
  */
 export async function handlePopupMenuClick(action) {
-    const params = await chrome.runtime.sendMessage({'action': 'generatePopupParams', 'popupAction': action});
+    const params = await chrome.runtime.sendMessage({ 'action': 'generatePopupParams', 'popupAction': action });
     if (!params) return;
     window.location.hash = params;
     window.location.reload();
 }
 
 const nodes = {};
+/** @type {Space|false} */
 let globalCurrentSpace;
 let globalTabId;
 let globalUrl;
 let globalWindowId;
 let globalSessionName;
 
+export function setGlobalCurrentSpace(space) {
+    globalCurrentSpace = space;
+}
+
+/**
+ * Determines the window ID to use based on URL hash and current window.
+ * This is the core logic for the bug fix that ensures correct window ID selection.
+ * @param {string} urlString - The full URL string including hash
+ * @param {number|null} currentWindowId - The ID of the current window, or null if not available yet
+ * @returns {number|false} The window ID to use, or false if invalid
+ */
+export function getWindowIdFromContext(urlString, currentWindowId) {
+    // First check if windowId is in the URL hash (e.g., when opened in quick-switch mode)
+    // This ensures we use the original browser window, not the popup window itself
+    const windowIdFromHash = getHashVariable('windowId', urlString);
+    let windowId;
+
+    if (windowIdFromHash && windowIdFromHash !== 'false') {
+        windowId = parseInt(windowIdFromHash, 10);
+    } else if (currentWindowId !== null) {
+        // Fallback to current window if not in hash (e.g., when opened from extension icon)
+        windowId = currentWindowId;
+    } else {
+        // No window ID available
+        return false;
+    }
+
+    // Validate the window ID (must be a positive integer)
+    return !isNaN(windowId) && windowId > 0 ? windowId : false;
+}
+
 /** Initialize the popup window. */
-function initializePopup() {
+export function initializePopup() {
     document.addEventListener('DOMContentLoaded', async () => {
         const url = getHashVariable('url', window.location.href);
         globalUrl = url !== '' ? decodeURIComponent(url) : false;
+
+        // Get the current window ID if needed (for fallback when no hash parameter exists)
         const currentWindow = await chrome.windows.getCurrent({ populate: true });
-        const windowId = currentWindow.id;
-        globalWindowId = windowId !== '' ? windowId : false;
+
+        // Determine which window ID to use (from hash or current window)
+        globalWindowId = getWindowIdFromContext(window.location.href, currentWindow.id);
         globalTabId = getHashVariable('tabId', window.location.href);
         const sessionName = getHashVariable(
             'sessionName',
@@ -43,7 +80,11 @@ function initializePopup() {
         const action = getHashVariable('action', window.location.href);
 
         const requestSpacePromise = globalWindowId
-            ? chrome.runtime.sendMessage({ action: 'requestSpaceFromWindowId', windowId: globalWindowId })
+            ? chrome.runtime.sendMessage({
+                action: 'requestSpaceFromWindowId',
+                windowId: globalWindowId,
+                matchByTabs: true,
+            })
             : chrome.runtime.sendMessage({ action: 'requestCurrentSpace' });
 
         requestSpacePromise.then(space => {
@@ -77,8 +118,8 @@ function renderCommon() {
     document.getElementById(
         'activeSpaceTitle'
     ).value = globalCurrentSpace.name
-        ? globalCurrentSpace.name
-        : UNSAVED_SESSION;
+            ? globalCurrentSpace.name
+            : UNSAVED_SESSION;
 
     document.querySelector('body').onkeyup = e => {
         // listen for escape key
@@ -126,12 +167,12 @@ function handleCloseAction() {
 
 async function renderMainCard() {
     const hotkeys = await requestHotkeys();
-        document.querySelector(
-            '#switcherLink .hotkey'
-        ).innerHTML = hotkeys.switchCode ? hotkeys.switchCode : NO_HOTKEY;
-        document.querySelector(
-            '#moverLink .hotkey'
-        ).innerHTML = hotkeys.moveCode ? hotkeys.moveCode : NO_HOTKEY;
+    document.querySelector(
+        '#switcherLink .hotkey'
+    ).innerHTML = hotkeys.switchCode ? hotkeys.switchCode : NO_HOTKEY;
+    document.querySelector(
+        '#moverLink .hotkey'
+    ).innerHTML = hotkeys.moveCode ? hotkeys.moveCode : NO_HOTKEY;
 
     const hotkeyEls = document.querySelectorAll('.hotkey');
     for (let i = 0; i < hotkeyEls.length; i += 1) {
@@ -144,7 +185,7 @@ async function renderMainCard() {
     }
 
     document
-        .querySelector('#allSpacesLink .optionText')
+        .getElementById('allSpacesLink')
         .addEventListener('click', () => {
             chrome.runtime.sendMessage({
                 action: 'requestShowSpaces',
@@ -152,10 +193,10 @@ async function renderMainCard() {
             window.close();
         });
     document
-        .querySelector('#switcherLink .optionText')
+        .getElementById('switcherLink')
         .addEventListener('click', () => handlePopupMenuClick('switch'));
     document
-        .querySelector('#moverLink .optionText')
+        .getElementById('moverLink')
         .addEventListener('click', () => handlePopupMenuClick('move'));
 }
 
@@ -190,18 +231,29 @@ function handleNameEdit() {
     }
 }
 
-async function handleNameSave() {
+export async function handleNameSave() {
+    /** @type {HTMLInputElement} */
     const inputEl = document.getElementById('activeSpaceTitle');
     const newName = inputEl.value;
 
-    if (
-        newName === UNSAVED_SESSION ||
-        newName === globalCurrentSpace.name
-    ) {
+    // If the input is empty and the space was previously unnamed, restore the placeholder.
+    if (newName.trim() === '' && !globalCurrentSpace.name) {
+        inputEl.value = UNSAVED_SESSION;
         return;
     }
 
-    const canOverwrite = await checkSessionOverwrite(newName);
+    // If the session is unnamed or the name has not changed, do nothing.
+    if (newName === UNSAVED_SESSION || newName === globalCurrentSpace.name) {
+        return;
+    }
+
+    // Spaces are looked up in the database by case-insensitive name. That means we do not allow
+    // two spaces to have case-insensitive identical names (e.g. "main" and "Main"). If the new
+    // name is a case-insensitive match of the previous name of the current session, we do not need
+    // to check for overwrite, we just let the capitalization change happen.
+    const caseInsensitiveMatch = globalCurrentSpace?.name
+        && globalCurrentSpace.name.toLowerCase() === newName.toLowerCase();
+    const canOverwrite = caseInsensitiveMatch || await checkSessionOverwrite(newName);
     if (!canOverwrite) {
         inputEl.value = globalCurrentSpace.name || UNSAVED_SESSION;
         inputEl.blur();
@@ -209,19 +261,26 @@ async function handleNameSave() {
     }
 
     if (globalCurrentSpace.sessionId) {
-        chrome.runtime.sendMessage({
+        const updatedSession = await chrome.runtime.sendMessage({
             action: 'updateSessionName',
             deleteOld: true,
             sessionName: newName,
             sessionId: globalCurrentSpace.sessionId,
         });
+        if (updatedSession) {
+            globalCurrentSpace.name = updatedSession.name;
+        }
     } else {
-        chrome.runtime.sendMessage({
+        const newSession = await chrome.runtime.sendMessage({
             action: 'saveNewSession',
             deleteOld: true,
             sessionName: newName,
             windowId: globalCurrentSpace.windowId,
         });
+        if (newSession) {
+            globalCurrentSpace.name = newSession.name;
+            globalCurrentSpace.sessionId = newSession.id;
+        }
     }
 }
 
@@ -233,7 +292,7 @@ async function renderSwitchCard() {
     document.getElementById(
         'popupContainer'
     ).innerHTML = document.getElementById('switcherTemplate').innerHTML;
-    
+
     const spaces = await chrome.runtime.sendMessage({ action: 'requestAllSpaces' });
     spacesRenderer.initialise(8, true);
     spacesRenderer.renderSpaces(spaces);
@@ -345,6 +404,7 @@ async function renderMoveCard() {
     }
 }
 
+// TODO: Is this used for anything anymore? When are globalTabId or globalUrl set?
 async function updateTabDetails() {
     let faviconSrc;
 
@@ -354,7 +414,7 @@ async function updateTabDetails() {
             action: 'requestTabDetail',
             tabId: globalTabId,
         });
-        
+
         if (tab) {
             nodes.activeTabTitle.innerHTML = escapeHtml(tab.title);
 
@@ -384,9 +444,9 @@ async function updateTabDetails() {
         const cleanUrl =
             globalUrl.indexOf('://') > 0
                 ? globalUrl.substr(
-                        globalUrl.indexOf('://') + 3,
-                        globalUrl.length
-                    )
+                    globalUrl.indexOf('://') + 3,
+                    globalUrl.length
+                )
                 : globalUrl;
         nodes.activeTabTitle.innerHTML = escapeHtml(cleanUrl);
         nodes.activeTabFavicon.setAttribute('src', '/img/new.png');

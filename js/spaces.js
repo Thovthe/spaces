@@ -1,5 +1,9 @@
 /* global chrome */
 
+/**
+ * @typedef {import('./common.js').Space} Space
+ */
+
 import { getHashVariable } from './common.js';
 import { checkSessionOverwrite, escapeHtml } from './utils.js';
 
@@ -8,12 +12,13 @@ const UNSAVED_SESSION = `<em>${UNSAVED_SESSION_NAME}</em>`;
 const nodes = {};
 let globalSelectedSpace;
 let bannerState;
+let isSaving = false;
 
 // METHODS FOR RENDERING SIDENAV (spaces list)
 
 function renderSpacesList(spaces) {
     let spaceEl;
-    
+
     // Clear globalSelectedSpace at the start - it will be set if we find a match
     globalSelectedSpace = null;
 
@@ -52,7 +57,7 @@ function renderSpaceListEl(space) {
     // Check if this space should be selected based on current hash
     const currentSessionId = getHashVariable('sessionId', window.location.href);
     const currentWindowId = getHashVariable('windowId', window.location.href);
-    
+
     if (
         (currentSessionId && space.sessionId && currentSessionId == space.sessionId) ||
         (currentWindowId && space.windowId && currentWindowId == space.windowId)
@@ -127,6 +132,7 @@ function updateButtons(space) {
         sessionId || windowId ? 'inline-block' : 'none';
     nodes.actionDelete.style.display =
         !windowId && sessionId ? 'inline-block' : 'none';
+    nodes.actionClose.style.display = windowId ? 'inline-block' : 'none';
 }
 
 function renderTabs(space) {
@@ -160,14 +166,19 @@ function renderTabListEl(tab, space) {
     const linkEl = document.createElement('a');
     const faviconEl = document.createElement('img');
 
-    // try to get best favicon url path
+    // Use the provided favicon URL if it exists and is not a generic Chrome theme icon.
     if (tab.favIconUrl && tab.favIconUrl.indexOf('chrome://theme') < 0) {
         faviconSrc = tab.favIconUrl;
-    } else {
-        // TODO(codedread): Fix this, it errors.
-        //faviconSrc = `chrome://favicon/${tab.url}`;
+        // Otherwise, if the tab has a URL, construct a URL to fetch the favicon
+        // via the extension's _favicon API. This is the recommended approach for Manifest V3.
+    } else if (tab.url) {
+        const pageUrl = encodeURIComponent(tab.url);
+        faviconSrc = `chrome-extension://${chrome.runtime.id}/_favicon/?pageUrl=${pageUrl}&size=16`;
     }
-    faviconEl.setAttribute('src', faviconSrc);
+
+    if (faviconSrc) {
+        faviconEl.setAttribute('src', faviconSrc);
+    }
 
     linkEl.innerHTML = escapeHtml(tab.title ?? tab.url);
     linkEl.setAttribute('href', tab.url);
@@ -301,38 +312,47 @@ function handleAutoUpdateRequest(spaces) {
     }
 }
 
-async function handleNameSave() {
-    const newName = nodes.nameFormInput.value;
-    const oldName = globalSelectedSpace.name;
-    const { sessionId } = globalSelectedSpace;
-    const { windowId } = globalSelectedSpace;
+export async function handleNameSave() {
+    if (isSaving) return;
+    isSaving = true;
 
-    // if invalid name set then revert back to non-edit mode
-    if (newName === oldName || newName.trim() === '') {
-        updateNameForm(globalSelectedSpace);
-        toggleNameEditMode(false);
-        return;
-    }
+    try {
+        const newName = nodes.nameFormInput.value;
+        const { name, sessionId, windowId } = globalSelectedSpace;
 
-    const canOverwrite = await checkSessionOverwrite(newName);
-    if (!canOverwrite) {
-        updateNameForm(globalSelectedSpace);
-        toggleNameEditMode(false);
-        return;
-    }
+        // if invalid name set then revert back to non-edit mode
+        if (newName === name || newName.trim() === '') {
+            updateNameForm(globalSelectedSpace);
+            toggleNameEditMode(false);
+            return;
+        }
 
-    // otherwise call the save service
-    if (sessionId) {
-        const session = await performSessionUpdate(newName, sessionId);
-        if (session) reroute(session.id, false, true);
-    } else if (windowId) {
-        const session = await performNewSessionSave(newName, windowId);
-        if (session) reroute(session.id, false, true);
-    }
+        // Spaces are looked up in the database by case-insensitive name. That means we do not allow
+        // two spaces to have case-insensitive identical names (e.g. "main" and "Main"). If the new
+        // name is a case-insensitive match of the previous name, we do not need to check overwrite.
+        const caseInsensitiveMatch = name && name.toLowerCase() === newName.toLowerCase();
+        const canOverwrite = caseInsensitiveMatch || await checkSessionOverwrite(newName);
+        if (!canOverwrite) {
+            updateNameForm(globalSelectedSpace);
+            toggleNameEditMode(false);
+            return;
+        }
 
-    // handle banner
-    if (bannerState === 1) {
-        setBannerState(2);
+        // otherwise call the save service
+        if (sessionId) {
+            const session = await performSessionUpdate(newName, sessionId);
+            if (session) reroute(session.id, false, true);
+        } else if (windowId) {
+            const session = await performNewSessionSave(newName, windowId);
+            if (session) reroute(session.id, false, true);
+        }
+
+        // handle banner
+        if (bannerState === 1) {
+            setBannerState(2);
+        }
+    } finally {
+        isSaving = false;
     }
 }
 
@@ -357,6 +377,38 @@ async function handleDelete() {
             reroute(false, false, true);
         }
     }
+}
+
+/**
+ * Closes the currently selected space's window after user confirmation (if unnamed).
+ * The arguments are only for testing purposes to allow dependency injection.
+ * @param {Function} updateSpacesListFn Function to refresh the spaces list after closing
+ * @param {Function} renderSpaceDetailFn Function to render space details (called with false, false to clear)
+ * @returns {Promise<void>}
+ */
+async function handleClose(
+    updateSpacesListFn = updateSpacesList,
+    renderSpaceDetailFn = renderSpaceDetail) {
+    if (!globalSelectedSpace || !globalSelectedSpace.windowId) {
+        console.error("No opened window is currently selected.");
+        return;
+    }
+    const { windowId, sessionId } = globalSelectedSpace;
+
+    // Only show confirm if the space is unnamed
+    if (!sessionId) {
+        const confirm = window.confirm("Are you sure you want to close this window?");
+        if (!confirm) return;
+    }
+
+    const success = await chrome.runtime.sendMessage({ action: 'closeWindow', windowId });
+    if (!success) {
+        console.warn("Failed to close window - it may have already been closed");
+    }
+
+    await updateSpacesListFn();
+    globalSelectedSpace = null;
+    renderSpaceDetailFn(false, false);
 }
 
 // import accepts either a newline separated list of urls or a json backup object
@@ -392,19 +444,8 @@ async function handleImport() {
 }
 
 async function handleBackup() {
-    // strip out unnessary content from each space
-    const leanSpaces = (await fetchAllSpaces()).map(space => {
-        return {
-            name: space.name,
-            tabs: space.tabs.map(curTab => {
-                return {
-                    title: curTab.title,
-                    url: normaliseTabUrl(curTab.url),
-                    favIconUrl: curTab.favIconUrl,
-                };
-            }),
-        };
-    });
+    // Get all spaces in lean format for backup
+    const leanSpaces = await getSpacesForBackup();
 
     const blob = new Blob([JSON.stringify(leanSpaces)], {
         type: 'application/json',
@@ -592,6 +633,9 @@ function addEventListeners() {
     nodes.actionDelete.addEventListener('click', () => {
         handleDelete();
     });
+    nodes.actionClose.addEventListener('click', () => {
+        handleClose();
+    });
     nodes.actionImport.addEventListener('click', e => {
         e.preventDefault();
         toggleModal(true);
@@ -668,7 +712,66 @@ async function updateSpaceDetail(useCachedSpace) {
     }
 }
 
+/**
+ * Initialize the spaces window.
+ * This function should be called from the HTML page after the DOM is loaded.
+ */
+export function initializeSpaces() {
+    // initialise global handles to key elements (singletons)
+    nodes.home = document.getElementById('spacesHome');
+    nodes.openSpaces = document.getElementById('openSpaces');
+    nodes.closedSpaces = document.getElementById('closedSpaces');
+    nodes.activeTabs = document.getElementById('activeTabs');
+    nodes.historicalTabs = document.getElementById('historicalTabs');
+    nodes.spaceDetailContainer = document.querySelector(
+        '.content .contentBody'
+    );
+    nodes.nameForm = document.querySelector('#nameForm');
+    nodes.nameFormDisplay = document.querySelector('#nameForm span');
+    nodes.nameFormInput = document.querySelector('#nameForm input');
+    nodes.actionSwitch = document.getElementById('actionSwitch');
+    nodes.actionOpen = document.getElementById('actionOpen');
+    nodes.actionEdit = document.getElementById('actionEdit');
+    nodes.actionClose = document.getElementById('actionClose');
+    nodes.actionExport = document.getElementById('actionExport');
+    nodes.actionBackup = document.getElementById('actionBackup');
+    nodes.actionDelete = document.getElementById('actionDelete');
+    nodes.actionImport = document.getElementById('actionImport');
+    nodes.banner = document.getElementById('banner');
+    nodes.modalBlocker = document.querySelector('.blocker');
+    nodes.modalContainer = document.querySelector('.modal');
+    nodes.modalInput = document.getElementById('importTextArea');
+    nodes.modalButton = document.getElementById('importBtn');
+
+    nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
+
+    // initialise event listeners for static elements
+    addEventListeners();
+
+    // render side nav
+    updateSpacesList();
+
+    // render main content
+    updateSpaceDetail();
+}
+
+// Auto-initialize when loaded in browser context
+if (typeof window !== 'undefined') {
+    window.onload = initializeSpaces;
+}
+// Module-level helper functions.
+
+/**
+ * Adds duplicate metadata to tabs within a space.
+ * Normalizes tab titles (using URL if title is missing) and marks tabs as duplicates
+ * if multiple tabs have the same title.
+ * 
+ * @param {Space} space - The space object containing an array of tabs
+ */
 function addDuplicateMetadata(space) {
+    if (!space || !Array.isArray(space.tabs)) {
+        return;
+    }
     const dupeCounts = {};
 
     space.tabs.forEach(tab => {
@@ -683,53 +786,6 @@ function addDuplicateMetadata(space) {
         tab.duplicate = dupeCounts[tab.title] > 1;
     });
 }
-
-/**
- * Initialize the spaces window.
- * This function should be called from the HTML page after the DOM is loaded.
- */
-// Auto-initialize when loaded in browser context
-if (typeof window !== 'undefined') {
-    window.onload = () => {
-        // initialise global handles to key elements (singletons)
-        nodes.home = document.getElementById('spacesHome');
-        nodes.openSpaces = document.getElementById('openSpaces');
-        nodes.closedSpaces = document.getElementById('closedSpaces');
-        nodes.activeTabs = document.getElementById('activeTabs');
-        nodes.historicalTabs = document.getElementById('historicalTabs');
-        nodes.spaceDetailContainer = document.querySelector(
-            '.content .contentBody'
-        );
-        nodes.nameForm = document.querySelector('#nameForm');
-        nodes.nameFormDisplay = document.querySelector('#nameForm span');
-        nodes.nameFormInput = document.querySelector('#nameForm input');
-        nodes.actionSwitch = document.getElementById('actionSwitch');
-        nodes.actionOpen = document.getElementById('actionOpen');
-        nodes.actionEdit = document.getElementById('actionEdit');
-        nodes.actionExport = document.getElementById('actionExport');
-        nodes.actionBackup = document.getElementById('actionBackup');
-        nodes.actionDelete = document.getElementById('actionDelete');
-        nodes.actionImport = document.getElementById('actionImport');
-        nodes.banner = document.getElementById('banner');
-        nodes.modalBlocker = document.querySelector('.blocker');
-        nodes.modalContainer = document.querySelector('.modal');
-        nodes.modalInput = document.getElementById('importTextArea');
-        nodes.modalButton = document.getElementById('importBtn');
-
-        nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
-
-        // initialise event listeners for static elements
-        addEventListeners();
-
-        // render side nav
-        updateSpacesList();
-
-        // render main content
-        updateSpaceDetail();
-    };
-}
-
-// Module-level helper functions.
 
 /**
  * Extracts the original URL from a Great Suspender extension suspended tab URL.
@@ -753,5 +809,45 @@ function normaliseTabUrl(url) {
     return normalisedUrl;
 }
 
+/**
+ * Gets all spaces and transforms them into lean format for backup/export.
+ * Strips out unnecessary properties and normalizes URLs.
+ * 
+ * @returns {Promise<Object[]>} Promise resolving to array of lean space objects with only essential properties
+ * 
+ * @example
+ * const leanSpaces = await getSpacesForBackup();
+ * // returns: [{ name: 'Work', tabs: [{ title: 'Gmail', url: 'https://gmail.com', favIconUrl: 'icon.png' }] }]
+ */
+async function getSpacesForBackup() {
+    const allSpaces = await fetchAllSpaces();
+    return allSpaces.map(space => {
+        return {
+            name: space.name,
+            tabs: space.tabs.map(curTab => {
+                return {
+                    title: curTab.title,
+                    url: normaliseTabUrl(curTab.url),
+                    favIconUrl: curTab.favIconUrl,
+                };
+            }),
+        };
+    });
+}
+
 // Export for testing
-export { normaliseTabUrl };
+export {
+    addDuplicateMetadata,
+    getSpacesForBackup,
+    handleClose,
+    normaliseTabUrl,
+};
+
+// Export globalSelectedSpace for testing (mutable reference)
+export function setGlobalSelectedSpace(space) { globalSelectedSpace = space; }
+export function getGlobalSelectedSpace() { return globalSelectedSpace; }
+
+// Export function to set nodes for testing (avoids calling initializeSpaces)
+export function setNodesForTesting(testNodes) {
+    Object.assign(nodes, testNodes);
+}

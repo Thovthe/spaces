@@ -4,12 +4,16 @@
 
 /* spaces
  * Copyright (C) 2015 Dean Oemcke
+ * Copyright (C) 2025 Jeff Schiller (Codedread)
  */
 
 import { dbService } from './dbService.js';
 import { spacesService } from './spacesService.js';
 import * as common from '../common.js';
+/** @typedef {common.SessionPresence} SessionPresence */
 /** @typedef {common.Space} Space */
+/** @typedef {common.Window} Window */
+/** @typedef {import('./dbService.js').WindowBounds} WindowBounds */
 
 // eslint-disable-next-line no-unused-vars, no-var
 let spacesPopupWindowId = false;
@@ -39,17 +43,17 @@ async function rediscoverWindowByUrl(storageKey, htmlFilename) {
 
     // If not in storage or window doesn't exist, search for window by URL
     const targetUrl = chrome.runtime.getURL(htmlFilename);
-    const allWindows = await chrome.windows.getAll({populate: true});
-    
+    const allWindows = await chrome.windows.getAll({ populate: true });
+
     for (const window of allWindows) {
         for (const tab of window.tabs) {
             if (tab.url && tab.url.startsWith(targetUrl)) {
-                await chrome.storage.local.set({[storageKey]: window.id});
+                await chrome.storage.local.set({ [storageKey]: window.id });
                 return window.id;
             }
         }
     }
-    
+
     return false;
 }
 
@@ -164,8 +168,21 @@ export function initializeServiceWorker() {
                 await closePopupWindow();
             }
         }
-        
+
         spacesService.handleWindowFocussed(windowId);
+    });
+
+    // Listen for window bounds changes (resize/move) with debouncing
+    chrome.windows.onBoundsChanged.addListener(async (window) => {
+        if (checkInternalSpacesWindows(window.id, false)) return;
+
+        // Capture bounds - await ensures proper event ordering and timer management
+        await spacesService.captureWindowBounds(window.id, {
+            left: window.left,
+            top: window.top,
+            width: window.width,
+            height: window.height
+        });
     });
 
     // add listeners for message requests from other extension pages (spaces.html & tab.html)
@@ -181,7 +198,7 @@ export function initializeServiceWorker() {
             try {
                 // Ensure spacesService is initialized before processing any message
                 await spacesService.ensureInitialized();
-                
+
                 const response = await processMessage(request, sender);
                 if (response !== undefined) {
                     sendResponse(response);
@@ -191,7 +208,7 @@ export function initializeServiceWorker() {
                 sendResponse(false);
             }
         })();
-        
+
         // We must return true synchronously to keep the message port open
         // for our async sendResponse() calls
         return true;
@@ -217,6 +234,20 @@ export function initializeServiceWorker() {
 
     console.log(`Initializing spacesService...`);
     spacesService.initialiseSpaces();
+
+    // Make debugging function available globally in service worker scope
+    globalThis.spaces = {
+        async dumpAnonymizedDatabase() {
+            try {
+                const exportData = await spacesService.exportDatabaseForDebugging();
+                const jsonString = JSON.stringify(exportData, null, 2);
+                const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(jsonString)}`;
+                await chrome.downloads.download({ url: dataUrl, filename: 'spaces-db.json' });
+            } catch (error) {
+                console.error('Failed to export database for debugging:', error);
+            }
+        }
+    };
 }
 
 /**
@@ -246,7 +277,11 @@ async function processMessage(request, sender) {
         case 'requestSpaceFromWindowId':
             windowId = cleanParameter(request.windowId);
             if (windowId) {
-                return requestSpaceFromWindowId(windowId);
+                let matchByTabs = undefined;
+                if (request.matchByTabs) {
+                    matchByTabs = cleanParameter(request.matchByTabs);
+                }
+                return requestSpaceFromWindowId(windowId, matchByTabs);
             }
             return undefined;
 
@@ -326,6 +361,28 @@ async function processMessage(request, sender) {
                 return handleDeleteSession(sessionId);
             }
             return undefined;
+
+        case 'closeWindow':
+            windowId = cleanParameter(request.windowId);
+            if (!windowId) {
+                return false;
+            }
+
+            try {
+                const window = await chrome.windows.get(windowId);
+                // Capture bounds before programmatically closing the window
+                await spacesService.captureWindowBounds(windowId, {
+                    left: window.left,
+                    top: window.top,
+                    width: window.width,
+                    height: window.height
+                });
+                await chrome.windows.remove(windowId);
+                return true;
+            } catch (error) {
+                console.error("Error closing window:", error);
+                return false;
+            }
 
         case 'updateSessionName':
             sessionId = cleanParameter(request.sessionId);
@@ -495,24 +552,6 @@ async function processMessage(request, sender) {
     }
 }
 
-/**
- * Ensures the parameter is a number.
- * @param {string|number} param - The parameter to clean.
- * @returns {number} - The cleaned parameter.
- */
-function cleanParameter(param) {
-    if (typeof param === 'number') {
-        return param;
-    }
-    if (param === 'false') {
-        return false;
-    }
-    if (param === 'true') {
-        return true;
-    }
-    return parseInt(param, 10);
-}
-
 function createShortcutsWindow() {
     chrome.tabs.create({ url: 'chrome://extensions/configureCommands' });
 }
@@ -540,18 +579,18 @@ async function showSpacesOpenWindow(windowId, editMode) {
 
         // otherwise re-create it
     } else {
-        // TODO(codedread): Handle multiple displays and errors.
-        const displays = await chrome.system.display.getInfo();
-        let screen = displays[0].bounds;
-        const window = await chrome.windows.create(
-            {
-                type: 'popup',
-                url,
-                height: screen.height - 100,
-                width: Math.min(screen.width, 1000),
-                top: 0,
-                left: 0,
-            });
+        // Display on the left-hand side of the appropriate display.
+        const workArea = await getTargetDisplayWorkArea();
+        const windowHeight = Math.round(workArea.height * 0.9);
+        const windowWidth = Math.min(workArea.width - 100, 1000);
+        const window = await chrome.windows.create({
+            type: 'popup',
+            url,
+            height: windowHeight,
+            width: windowWidth,
+            top: workArea.top,
+            left: workArea.left,
+        });
         spacesOpenWindowId = window.id;
         await chrome.storage.local.set({spacesOpenWindowId: window.id});
     }
@@ -618,20 +657,19 @@ async function createOrShowSpacesPopupWindow(action, tabUrl) {
 
         // otherwise create it
     } else {
-        // TODO(codedread): Handle multiple displays and errors.
-        const displays = await chrome.system.display.getInfo();
-        let screen = displays[0].bounds;
-
-        const window = await chrome.windows.create(
-            {
-                type: 'popup',
-                url: popupUrl,
-                focused: true,
-                height: 450,
-                width: 310,
-                top: screen.height - 450,
-                left: screen.width - 310,
-            });
+        // Display in the lower-right corner of the appropriate display.
+        const workArea = await getTargetDisplayWorkArea();
+        const popupHeight = 450;
+        const popupWidth = 310;
+        const window = await chrome.windows.create({
+            type: 'popup',
+            url: popupUrl,
+            focused: true,
+            height: popupHeight,
+            width: popupWidth,
+            top: Math.round(workArea.top + workArea.height - popupHeight),
+            left: Math.round(workArea.left + workArea.width - popupWidth),
+        });
         spacesPopupWindowId = window.id;
         await chrome.storage.local.set({spacesPopupWindowId: window.id});
     }
@@ -723,7 +761,11 @@ function checkInternalSpacesWindows(windowId, windowClosed) {
  */
 async function requestSessionPresence(sessionName) {
     const session = await dbService.fetchSessionByName(sessionName);
-    return { exists: !!session, isOpen: !!session && !!session.windowId };
+    return {
+        exists: !!session,
+        isOpen: !!session && !!session.windowId,
+        sessionName: session?.name || false,
+    };
 }
 
 /**
@@ -749,9 +791,11 @@ async function requestCurrentSpace() {
 
 /**
  * @param {number} windowId
+ * @param {boolean|undefined} matchByTabs - Whether to match the space by tabs if matching by
+ * windowId fails. If undefined, the default is to match by windowId only.
  * @returns {Promise<Space|false>}
  */
-async function requestSpaceFromWindowId(windowId) {
+async function requestSpaceFromWindowId(windowId, matchByTabs) {
     // first check for an existing session matching this windowId
     const session = await dbService.fetchSessionByWindowId(windowId);
 
@@ -765,11 +809,37 @@ async function requestSpaceFromWindowId(windowId) {
             history: session.history,
         };
         return space;
-
-    // otherwise build a space object out of the actual window
     } else {
         try {
+            /** @type {Window} */
             const window = await chrome.windows.get(windowId, { populate: true });
+
+            if (matchByTabs) {
+                console.log(`matchByTabs=true`);
+                const allSpaces = await requestAllSpaces();
+                // If any space in the database has the exact same tabs in the exact same order as
+                // the currently-open window, then we assume the window got out of sync (due to a
+                // Chrome restart or other factors). Update the database with the new window id and
+                // return it.
+                for (const space of allSpaces) {
+                    if (
+                        space.tabs.length === window.tabs.length &&
+                        space.tabs.every((tab, index) => tab.url === window.tabs[index].url)
+                    ) {
+                        // Update the database object.
+                        const dbSession = await dbService.fetchSessionById(space.sessionId);
+                        dbSession.windowId = windowId;
+                        await dbService.updateSession(dbSession);
+
+                        // Update the space object and return it.
+                        space.windowId = windowId;
+                        console.log(`matchByTabs: Found a session and updated it.`);
+                        return space;
+                    }
+                }
+            }
+
+            // Otherwise build a space object out of the actual window.
             /** @type {Space} */
             const space = {
                 sessionId: false,
@@ -795,11 +865,11 @@ async function requestSpaceFromWindowId(windowId) {
  */
 async function requestSpaceFromSessionId(sessionId) {
     const session = await dbService.fetchSessionById(sessionId);
-    
+
     if (!session) {
         return null;
     }
-    
+
     return {
         sessionId: session.id,
         windowId: session.windowId,
@@ -807,47 +877,6 @@ async function requestSpaceFromSessionId(sessionId) {
         tabs: session.tabs,
         history: session.history,
     };
-}
-
-/**
- * Requests all spaces (sessions) from the database.
- * 
- * @returns {Promise<Space[]>} Promise that resolves to an array of Space objects
- */
-async function requestAllSpaces() {
-    // Get all sessions from spacesService (includes both saved and temporary open window sessions)
-    const allSessions = await spacesService.getAllSessions();
-    /** @type {Space[]} */
-    const allSpaces = allSessions
-        .map(session => {
-            return { sessionId: session.id, ...session };
-        })
-        .filter(session => {
-            return session && session.tabs && session.tabs.length > 0;
-        });
-
-    // sort results
-    allSpaces.sort(spaceDateCompare);
-
-    return allSpaces;
-}
-
-function spaceDateCompare(a, b) {
-    // order open sessions first
-    if (a.windowId && !b.windowId) {
-        return -1;
-    }
-    if (!a.windowId && b.windowId) {
-        return 1;
-    }
-    // then order by last access date
-    if (a.lastAccess > b.lastAccess) {
-        return -1;
-    }
-    if (a.lastAccess < b.lastAccess) {
-        return 1;
-    }
-    return 0;
 }
 
 async function handleLoadSession(sessionId, tabUrl) {
@@ -863,18 +892,17 @@ async function handleLoadSession(sessionId, tabUrl) {
             return curTab.url;
         });
 
-        // TODO(codedread): Handle multiple displays and errors.
-        const displays = await chrome.system.display.getInfo();
-        let screen = displays[0].bounds;
-
-        const newWindow = await chrome.windows.create(
-            {
-                url: urls,
-                height: screen.height - 100,
-                width: screen.width - 100,
-                top: 0,
-                left: 0,
-            });
+        // Display new session with calculated bounds
+        const workArea = await getTargetDisplayWorkArea();
+        const bounds = calculateSessionBounds(workArea, session.windowBounds);
+        let windowOptions = {
+            url: urls,
+            height: bounds.height,
+            width: bounds.width,
+            top: bounds.top,
+            left: bounds.left
+        };
+        const newWindow = await chrome.windows.create(windowOptions);
 
         // force match this new window to the session
         await spacesService.matchSessionToWindow(session, newWindow);
@@ -884,10 +912,7 @@ async function handleLoadSession(sessionId, tabUrl) {
             if (curSessionTab.pinned) {
                 let pinnedTabId = false;
                 newWindow.tabs.some(curNewTab => {
-                    if (
-                        curNewTab.url === curSessionTab.url ||
-                        curNewTab.pendingUrl === curSessionTab.url
-                    ) {
+                    if (getEffectiveTabUrl(curNewTab) === curSessionTab.url) {
                         pinnedTabId = curNewTab.id;
                         return true;
                     }
@@ -906,44 +931,25 @@ async function handleLoadSession(sessionId, tabUrl) {
             await focusOrLoadTabInWindow(newWindow, tabUrl);
         }
 
-                /* session.tabs.forEach(function (curTab) {
-                chrome.tabs.create({windowId: newWindow.id, url: curTab.url, pinned: curTab.pinned, active: false});
-            });
+        /* session.tabs.forEach(function (curTab) {
+        chrome.tabs.create({windowId: newWindow.id, url: curTab.url, pinned: curTab.pinned, active: false});
+    });
 
-            const tabs = await chrome.tabs.query({windowId: newWindow.id, index: 0});
-            chrome.tabs.remove(tabs[0].id); */
+    const tabs = await chrome.tabs.query({windowId: newWindow.id, index: 0});
+    chrome.tabs.remove(tabs[0].id); */
     }
 }
 
 async function handleLoadWindow(windowId, tabUrl) {
     // assume window is already open, give it focus
     if (windowId) {
-        await focusWindow(windowId);
+        await chrome.windows.update(windowId, { focused: true })
     }
 
     // if tabUrl is defined, then focus this tab
     if (tabUrl) {
         const theWin = await chrome.windows.get(windowId, { populate: true });
         await focusOrLoadTabInWindow(theWin, tabUrl);
-    }
-}
-
-async function focusWindow(windowId) {
-    await chrome.windows.update(windowId, { focused: true });
-}
-
-async function focusOrLoadTabInWindow(window, tabUrl) {
-    let match = false;
-    for (const tab of window.tabs) {
-        if (tab.url === tabUrl) {
-            await chrome.tabs.update(tab.id, { active: true });
-            match = true;
-            break;
-        }
-    }
-
-    if (!match) {
-        await chrome.tabs.create({ url: tabUrl });
     }
 }
 
@@ -976,7 +982,13 @@ async function handleSaveNewSession(windowId, sessionName, deleteOld) {
     const result = await spacesService.saveNewSession(
         sessionName,
         curWindow.tabs,
-        curWindow.id
+        curWindow.id,
+        {
+            left: curWindow.left,
+            top: curWindow.top,
+            width: curWindow.width,
+            height: curWindow.height
+        },
     );
     return result ?? false;
 }
@@ -1003,7 +1015,7 @@ async function handleRestoreFromBackup(space, deleteOld) {
             );
             return null;
         }
-        
+
         // if we choose to overwrite, delete the existing session
         await handleDeleteSession(existingSession.id);
     }
@@ -1051,19 +1063,20 @@ async function handleUpdateSessionName(sessionId, sessionName, deleteOld) {
     // check to make sure session name doesn't already exist
     const existingSession = await dbService.fetchSessionByName(sessionName);
 
-    // if session with same name already exist, then prompt to override the existing session
-    if (existingSession) {
+    // If a different session with same name already exists, then prompt to
+    // override the existing session.
+    if (existingSession && existingSession.id !== sessionId) {
         if (!deleteOld) {
             console.error(
                 `handleUpdateSessionName: Session with name "${sessionName}" already exists and deleteOld was not true.`
             );
             return false;
         }
-        
+
         // if we choose to override, then delete the existing session
         await handleDeleteSession(existingSession.id);
     }
-    
+
     return spacesService.updateSessionName(sessionId, sessionName) ?? false;
 }
 
@@ -1210,7 +1223,7 @@ async function handleMoveTabToSession(tabId, sessionId) {
     if (!session) {
         return false;
     }
-    
+
     // if session is currently open then move it directly
     if (session.windowId) {
         moveTabToWindow(tab, session.windowId);
@@ -1255,5 +1268,172 @@ function moveTabToWindow(tab, windowId) {
     spacesService.queueWindowEvent(windowId);
 }
 
+// Module-level helper functions.
+
+/**
+ * Determines the window bounds to use for a session restore.
+ * @param {WindowBounds} displayBounds - The target display work area bounds
+ * @param {WindowBounds} sessionBounds - The stored session bounds
+ * @returns {WindowBounds} - The bounds to use for the window
+ */
+function calculateSessionBounds(displayBounds, sessionBounds) {
+    if (!sessionBounds
+        || typeof sessionBounds.left !== 'number'
+        || typeof sessionBounds.top !== 'number'
+        || typeof sessionBounds.width !== 'number'
+        || typeof sessionBounds.height !== 'number'
+        || sessionBounds.left < displayBounds.left
+        || sessionBounds.top < displayBounds.top
+        || sessionBounds.left + sessionBounds.width > displayBounds.left + displayBounds.width
+        || sessionBounds.top + sessionBounds.height > displayBounds.top + displayBounds.height
+    ) {
+        // Fallback to display default area positioning (minus offset)
+        return {
+            left: displayBounds.left,
+            top: displayBounds.top,
+            width: displayBounds.width - 100,
+            height: displayBounds.height - 100,
+        };
+    }
+    // Otherwise, use the stored session bounds
+    return {
+        left: sessionBounds.left,
+        top: sessionBounds.top,
+        width: sessionBounds.width,
+        height: sessionBounds.height
+    };
+}
+
+/**
+ * Ensures the parameter is a number or boolean.
+ * @param {string|number} param - The parameter to clean.
+ * @returns {number|boolean} - The cleaned parameter.
+ */
+function cleanParameter(param) {
+    if (typeof param === 'number') {
+        return param;
+    }
+    if (param === 'false') {
+        return false;
+    }
+    if (param === 'true') {
+        return true;
+    }
+    return parseInt(param, 10);
+}
+
+/**
+ * Searches for a tab with a specific URL within a given window.
+ * If a matching tab is found, it is brought into focus.
+ * If no matching tab is found, a new tab with the specified URL is created and activated.
+ * Note: The new tab is created in the current window, not necessarily the one passed as a parameter.
+ *
+ * @param {chrome.windows.Window} window The window object to search for the tab in. It should contain a `tabs` array.
+ * @param {string} tabUrl The URL of the tab to find or create.
+ * @returns {Promise<void>} A promise that resolves once the tab is focused or created.
+ */
+async function focusOrLoadTabInWindow(window, tabUrl) {
+    let match = false;
+    for (const tab of window.tabs || []) {
+        if (getEffectiveTabUrl(tab) === tabUrl) {
+            await chrome.tabs.update(tab.id, { active: true });
+            match = true;
+            break;
+        }
+    }
+
+    if (!match) {
+        await chrome.tabs.create({ url: tabUrl, active: true });
+    }
+}
+
+/**
+ * Gets the effective URL of a tab, preferring pendingUrl for loading tabs.
+ * @param {chrome.tabs.Tab} tab The tab object to get the effective URL from.
+ * @returns {string} The effective URL of the tab.
+ */
+function getEffectiveTabUrl(tab) {
+    if (tab.status === 'loading' && tab.pendingUrl) {
+        return tab.pendingUrl;
+    }
+    return tab.url;
+}
+
+/**
+ * Determines the most appropriate display to show a new window on.
+ * It prefers the display containing the currently focused Chrome window.
+ * If no window is focused, it falls back to the primary display.
+ * @returns {Promise<chrome.system.display.Bounds>} A promise that resolves to the work area bounds of the target display.
+ */
+async function getTargetDisplayWorkArea() {
+    const [displays, currentWindow] = await Promise.all([
+        chrome.system.display.getInfo(),
+        chrome.windows.getCurrent().catch(() => null) // Catch if no window is focused
+    ]);
+
+    let targetDisplay = displays.find(d => d.isPrimary) || displays[0]; // Default to primary
+
+    // Find the display that contains the center of the current window
+    if (currentWindow) {
+        const windowCenterX = currentWindow.left + currentWindow.width / 2;
+        const windowCenterY = currentWindow.top + currentWindow.height / 2;
+        const activeDisplay = displays.find(display => {
+            const d = display.workArea;
+            return windowCenterX >= d.left && windowCenterX < (d.left + d.width) &&
+                windowCenterY >= d.top && windowCenterY < (d.top + d.height);
+        });
+        if (activeDisplay) {
+            targetDisplay = activeDisplay;
+        }
+    }
+
+    return targetDisplay.workArea;
+}
+
+/**
+ * Requests all spaces (sessions) from the database.
+ * 
+ * @returns {Promise<Space[]>} Promise that resolves to an array of Space objects
+ */
+async function requestAllSpaces() {
+    // Get all sessions from spacesService (includes both saved and temporary open window sessions)
+    const allSessions = await spacesService.getAllSessions();
+    /** @type {Space[]} */
+    const allSpaces = allSessions
+        .map(session => { return { sessionId: session.id, ...session } })
+        .filter(session => session?.tabs?.length > 0);
+
+    // sort results
+    allSpaces.sort((a, b) => {
+        // order open sessions first
+        if (a.windowId && !b.windowId) {
+            return -1;
+        }
+        if (!a.windowId && b.windowId) {
+            return 1;
+        }
+        // then order by last access date
+        if (a.lastAccess > b.lastAccess) {
+            return -1;
+        }
+        if (a.lastAccess < b.lastAccess) {
+            return 1;
+        }
+        return 0;
+    });
+
+    return allSpaces;
+}
+
 // Exports for testing.
-export { cleanParameter };
+export {
+    calculateSessionBounds,
+    cleanParameter,
+    focusOrLoadTabInWindow,
+    getEffectiveTabUrl,
+    getTargetDisplayWorkArea,
+    handleLoadSession,
+    handleUpdateSessionName,
+    requestAllSpaces,
+    requestSpaceFromWindowId,
+};

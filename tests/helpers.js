@@ -15,11 +15,21 @@ export const setupChromeMocks = () => {
         runtime: {
             sendMessage: jest.fn(),
         },
-        windows: {
-            getCurrent: jest.fn(),
+        system: {
+            display: {
+                getInfo: jest.fn(),
+            },
         },
         tabs: {
+            create: jest.fn(),
             query: jest.fn(),
+            update: jest.fn(),
+        },
+        windows: {
+            create: jest.fn(),
+            get: jest.fn(),
+            getCurrent: jest.fn(),
+            update: jest.fn(),
         }
     };
 };
@@ -45,7 +55,7 @@ export const setupDOMMocks = () => {
         querySelector: jest.fn(),
         querySelectorAll: jest.fn(),
     };
-    
+
     global.window = {
         location: {
             href: 'popup.html#',
@@ -53,7 +63,12 @@ export const setupDOMMocks = () => {
             reload: jest.fn(),
         },
         close: jest.fn(),
+        confirm: jest.fn(),
     };
+
+    // Make confirm and alert available globally (not just on window)
+    global.confirm = global.window.confirm;
+    global.alert = jest.fn();
 };
 
 /**
