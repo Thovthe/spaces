@@ -5,9 +5,8 @@
     "permissions": [
         "contextMenus",
         "history",
-        "storage",
-        "system.display",
         "tabs",
+        "storage",
         "unlimitedStorage"
     ],
     "browser_specific_settings": {

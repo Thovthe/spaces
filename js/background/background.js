@@ -171,7 +171,7 @@ export function initializeServiceWorker() {
 
         spacesService.handleWindowFocussed(windowId);
     });
-
+/*
     // Listen for window bounds changes (resize/move) with debouncing
     chrome.windows.onBoundsChanged.addListener(async (window) => {
         if (checkInternalSpacesWindows(window.id, false)) return;
@@ -184,7 +184,7 @@ export function initializeServiceWorker() {
             height: window.height
         });
     });
-
+*/
     // add listeners for message requests from other extension pages (spaces.html & tab.html)
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -580,16 +580,16 @@ async function showSpacesOpenWindow(windowId, editMode) {
         // otherwise re-create it
     } else {
         // Display on the left-hand side of the appropriate display.
-        const workArea = await getTargetDisplayWorkArea();
-        const windowHeight = Math.round(workArea.height * 0.9);
-        const windowWidth = Math.min(workArea.width - 100, 1000);
+/*        const workArea = await getTargetDisplayWorkArea();*/
+        const windowHeight = 200/*Math.round(workArea.height * 0.9)*/;
+        const windowWidth = 300/*Math.min(workArea.width - 100, 1000)*/;
         const window = await chrome.windows.create({
             type: 'popup',
             url,
             height: windowHeight,
             width: windowWidth,
-            top: workArea.top,
-            left: workArea.left,
+            top: 100/*workArea.top*/,
+            left: 100/*workArea.left*/,
         });
         spacesOpenWindowId = window.id;
         await chrome.storage.local.set({spacesOpenWindowId: window.id});
@@ -658,7 +658,7 @@ async function createOrShowSpacesPopupWindow(action, tabUrl) {
         // otherwise create it
     } else {
         // Display in the lower-right corner of the appropriate display.
-        const workArea = await getTargetDisplayWorkArea();
+/*        const workArea = await getTargetDisplayWorkArea();*/
         const popupHeight = 450;
         const popupWidth = 310;
         const window = await chrome.windows.create({
@@ -667,8 +667,8 @@ async function createOrShowSpacesPopupWindow(action, tabUrl) {
             focused: true,
             height: popupHeight,
             width: popupWidth,
-            top: Math.round(workArea.top + workArea.height - popupHeight),
-            left: Math.round(workArea.left + workArea.width - popupWidth),
+            top: 500/*Math.round(workArea.top + workArea.height - popupHeight)*/,
+            left: 800/*Math.round(workArea.left + workArea.width - popupWidth)*/,
         });
         spacesPopupWindowId = window.id;
         await chrome.storage.local.set({spacesPopupWindowId: window.id});
@@ -893,14 +893,14 @@ async function handleLoadSession(sessionId, tabUrl) {
         });
 
         // Display new session with calculated bounds
-        const workArea = await getTargetDisplayWorkArea();
-        const bounds = calculateSessionBounds(workArea, session.windowBounds);
+        /*const workArea = await getTargetDisplayWorkArea();
+        const bounds = calculateSessionBounds(workArea, session.windowBounds);*/
         let windowOptions = {
             url: urls,
-            height: bounds.height,
-            width: bounds.width,
-            top: bounds.top,
-            left: bounds.left
+            height: 200,
+            width: 300,
+            top: 100,
+            left: 100
         };
         const newWindow = await chrome.windows.create(windowOptions);
 
@@ -1365,6 +1365,7 @@ function getEffectiveTabUrl(tab) {
  * If no window is focused, it falls back to the primary display.
  * @returns {Promise<chrome.system.display.Bounds>} A promise that resolves to the work area bounds of the target display.
  */
+/**
 async function getTargetDisplayWorkArea() {
     const [displays, currentWindow] = await Promise.all([
         chrome.system.display.getInfo(),
@@ -1389,6 +1390,7 @@ async function getTargetDisplayWorkArea() {
 
     return targetDisplay.workArea;
 }
+*/
 
 /**
  * Requests all spaces (sessions) from the database.
@@ -1431,7 +1433,7 @@ export {
     cleanParameter,
     focusOrLoadTabInWindow,
     getEffectiveTabUrl,
-    getTargetDisplayWorkArea,
+/*    getTargetDisplayWorkArea,*/
     handleLoadSession,
     handleUpdateSessionName,
     requestAllSpaces,
