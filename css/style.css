@@ -108,7 +108,17 @@ ul {
 }
 
 /* END RESET */
-
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+}
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-Italic-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+	 font-style: italic;
+}
 html,
 body {
     margin: 0;

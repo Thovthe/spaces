@@ -1,5 +1,16 @@
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+}
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-Italic-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+	 font-style: italic;
+}
 body {
-    font-family: 'Open Sans', sans-serif;
+    font-family: 'Open Sans';
     font-weight: 200;
     padding: 0;
     margin: 0;
