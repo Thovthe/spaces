@@ -704,17 +704,13 @@ async function closePopupWindow() {
 }
 
 async function updateSpacesWindow(source) {
-    if (debug) {
-        // eslint-disable-next-line no-console
-        console.log(`updateSpacesWindow: triggered. source: ${source}`);
-    }
 
+//    console.log(`updateSpacesWindow: triggered. source: ${source}`);  // For debug
+    
     // If we don't have a cached spacesOpenWindowId, try to find the spaces window
     if (!spacesOpenWindowId) {
         await rediscoverWindowIds();
-    }
-
-    if (spacesOpenWindowId) {
+    } else if (spacesOpenWindowId) {
         const spacesOpenWindow = await chrome.windows.get(spacesOpenWindowId);
         if (chrome.runtime.lastError || !spacesOpenWindow) {
             // eslint-disable-next-line no-console
@@ -726,8 +722,8 @@ async function updateSpacesWindow(source) {
 
         try {
             const allSpaces = await requestAllSpaces();
-            chrome.runtime.sendMessage({
-                action: 'updateSpaces',
+            chrome.runtime.sendMessage({      //Thovthe: Where is this message supposed to go?
+                action: 'updateSpacesWindow', //Thovthe: Should this be updateSpacesWindow or updateSpaces? bug???
                 spaces: allSpaces,
             });
         } catch (err) {

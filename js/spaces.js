@@ -596,8 +596,9 @@ function addEventListeners() {
 
     // register incoming events listener
     chrome.runtime.onMessage.addListener(request => {
-        if (request.action === 'updateSpaces' && request.spaces) {
+        if (request.action === 'updateSpaces' && request.spaces) { //Thovthe: Should this be 'updateSpacesList'? bug???
             handleAutoUpdateRequest(request.spaces);
+            console.log("request.action was === to updateSpaces...");
         }
     });
 
