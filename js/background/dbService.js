@@ -167,7 +167,7 @@ class DbService {
             const sessions = await this._fetchAllSessions();
             let matchIndex;
             const matchFound = sessions.some((session, index) => {
-                if (session.name?.toLowerCase() === sessionName.toLowerCase()) {
+                if (String(session.name)?.toLowerCase() === String(sessionName).toLowerCase()) {  //Seems like these need .toString() but then it identifies everything as false????
                     matchIndex = index;
                     return true;
                 }

@@ -411,12 +411,54 @@ async function handleClose(
     renderSpaceDetailFn(false, false);
 }
 
+// Need these for import file input.
+const fileInput = document.querySelector("input[type=file]");
+
+fileInput.addEventListener("change", () => {
+    console.log("fileInput change detected");
+    handleImport();
+    toggleModal(false);
+    });
+
+
 // import accepts either a newline separated list of urls or a json backup object
 async function handleImport() {
     let urlList;
     let spaces;
+    
+    console.log("handleImport called")
+    console.log(fileInput.files[0])
 
-    const rawInput = nodes.modalInput.value;
+
+    const readFileAsText = (inputFile) => {
+        const reader = new FileReader();
+
+        return new Promise((resolve, reject) => {
+            reader.onError = () => {
+                reader.abort();
+                reject(new DOMException("Problem parsing input file."));
+            };
+
+            reader.onload = () => {
+                resolve(reader.result);
+            };
+            
+            reader.readAsText(inputFile);
+        });
+    };
+
+
+    const file = fileInput.files[0];
+/*    const reader = new FileReader();
+    if (file) {(
+        console.log("file is thruthy for if"),
+        await reader.readAsText(file)
+        )};*/
+    const rawInput = (file) ? (console.log("file is truthy"), await readFileAsText(file)) : (console.log("file is falsey"), nodes.modalInput.value);
+
+
+    console.log(rawInput)
+
 
     // check for json object
     try {
@@ -648,6 +690,10 @@ function addEventListeners() {
         handleImport();
         toggleModal(false);
     });
+/*    input.importFileBtn.addEventListener('change', () => {
+        handleImport();
+        toggleModal(false);
+    });*/ // Thovthe: Trying label instead.
 }
 
 // ROUTING
@@ -743,6 +789,7 @@ export function initializeSpaces() {
     nodes.modalContainer = document.querySelector('.modal');
     nodes.modalInput = document.getElementById('importTextArea');
     nodes.modalButton = document.getElementById('importBtn');
+    nodes.modalFileButton = document.getElementById('importFileBtn');
 
     nodes.home.setAttribute('href', chrome.runtime.getURL('spaces.html'));
 
