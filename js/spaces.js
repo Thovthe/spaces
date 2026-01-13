@@ -411,24 +411,23 @@ async function handleClose(
     renderSpaceDetailFn(false, false);
 }
 
+
+
 // Need these for import file input.
 const fileInput = document.querySelector("input[type=file]");
-
 fileInput.addEventListener("change", () => {
-    console.log("fileInput change detected");
+//    console.log("fileInput change detected");  // Debug
     handleImport();
     toggleModal(false);
     });
-
 
 // import accepts either a newline separated list of urls or a json backup object
 async function handleImport() {
     let urlList;
     let spaces;
     
-    console.log("handleImport called")
-    console.log(fileInput.files[0])
-
+//    console.log("handleImport called")  // Debug
+//    console.log(fileInput.files[0])  // Debug
 
     const readFileAsText = (inputFile) => {
         const reader = new FileReader();
@@ -447,18 +446,10 @@ async function handleImport() {
         });
     };
 
-
     const file = fileInput.files[0];
-/*    const reader = new FileReader();
-    if (file) {(
-        console.log("file is thruthy for if"),
-        await reader.readAsText(file)
-        )};*/
-    const rawInput = (file) ? (console.log("file is truthy"), await readFileAsText(file)) : (console.log("file is falsey"), nodes.modalInput.value);
+    const rawInput = (file) ? (/*console.log("file is truthy"),*/ await readFileAsText(file)) : (/*console.log("file is falsey"),*/ nodes.modalInput.value);
 
-
-    console.log(rawInput)
-
+//    console.log(rawInput)  // Debug
 
     // check for json object
     try {
@@ -690,7 +681,7 @@ function addEventListeners() {
         handleImport();
         toggleModal(false);
     });
-/*    input.importFileBtn.addEventListener('change', () => {
+/*    input.importFileBtn.addEventListener('click', () => {
         handleImport();
         toggleModal(false);
     });*/ // Thovthe: Trying label instead.

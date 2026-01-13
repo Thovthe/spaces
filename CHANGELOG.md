@@ -2,12 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.10] 2026-01-16
+
+### Changes
+
+- This is the initial release of Spaces for FireFox
+- You can now select a file for importing a `spaces-backup.json` instead of pasting. This saves loading a long single line file in an editor to copy over.
+- Default shortcuts were changed so that they don't collide with built in functions on FireFox. Quick switch is `Ctrl`+`Shift`+`Q` and move tab is `Ctrl`+`Shift`+`>` these can be changed from `about:addons > ... next to spaces > Manage > Cog Icon > Manage Extension Shortcuts`
+- Some of the advanced window management features have been disabled because they use APIs not present in FF I will be trying to get as much as possible ported over in future.
+
+### Improvements
+
+- FontAwesome and the OpenSans font have been packaged in statically. Both have been optimised to reduce footprint but if anyone sees further improvements, let me know.
+- Spiffed up most of the Spaces icons and optimised them all for size.
+
+### Fixes
+
+- Fixed a bug in `updateSpacesWindow`.  Not seeing anymore of those errors in my testing.
+
+
 ## [1.1.9] - 2025-12-10
 
 ### Changes
 
 - Fixed [issue #33](https://github.com/codedread/spaces/issues/33): Allow setting the Active space name from quick-switch mode.
 - Increased unit test coverage from 23.62% to 23.91%.
+
 
 ## [1.1.8] - 2025-12-03
 
@@ -16,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - Fixed [issue #31](https://github.com/codedread/spaces/issues/31): Allow changing the capitalization of space names.
 - Fixed [issue #25](https://github.com/codedread/spaces/issues/25): Restore window ids from lost sessions in the db.
 - Increased unit test coverage from 16.17% to 23.62%.
+
 
 ## [1.1.7] - 2025-10-01
 
@@ -26,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - Fixed [issue #29](https://github.com/codedread/spaces/issues/29): Provide a debug method to export anonymized Spaces DB for debugging.
 - Fixed [issue #30](https://github.com/codedread/spaces/issues/30): Do not prompt twice to overwrite space name.
 - Increased unit test coverage from 10.75% to 16.17%.
+
 
 ## [1.1.6] - 2025-09-17
 
@@ -61,6 +83,7 @@ All notable changes to this project will be documented in this file.
 ### Changes
 
 - Increased unit test coverage from 3.11% to 8.11%.
+
 
 ## [1.1.4] - 2025-09-03
 
