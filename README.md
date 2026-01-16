@@ -28,7 +28,7 @@ Isn't this essentially just bookmarks with folders? Yeah, pretty much - but you'
 
 Currently waiting to publish for general use but you can try it out temporarily by:
 1. Downloading the .zip of your desired version from the [releases](https://github.com/Thovthe/spaces/releases) page.
-2. Navigating to [about:debugging#/runtime/this-firefox](about:debugging#/runtime/this-firefox).
+2. Navigating to `about:debugging#/runtime/this-firefox`.
 3. Click `Load Temporary Add-on...`
 4. Then select your chosen .zip file and click `Open`
 5. **Remember** when installed this way the extension will disappear when you close all your FF windows. Be sure to backup your spaces.
