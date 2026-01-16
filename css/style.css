@@ -108,7 +108,17 @@ ul {
 }
 
 /* END RESET */
-
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+}
+@font-face {
+	 font-family: 'Open Sans';
+	 src: url('../extResources/OpenSans/OpenSans-Italic-VariableFont_wdth,wght.woff2')
+			format("woff2-variations");
+	 font-style: italic;
+}
 html,
 body {
     margin: 0;
@@ -131,6 +141,9 @@ input {
     font-weight: 200;
     font-size: 19px;
     padding-left: 5px;
+}
+#importFileBtn{
+    opacity: 0;
 }
 a {
     color: #000;
@@ -195,6 +208,9 @@ a.active {
     display: none;
     padding: 21px 14px;
     font-size: 25px;
+    background: transparent;
+    border: none;
+    color: #000;
 }
 .header .button:hover {
     cursor: pointer;
@@ -343,4 +359,8 @@ a.active {
 .modal .button:hover {
     background-color: #ffaf29;
     text-decoration: none;
+}
+.modal .impfile {
+    padding: 8px 16px;
+	 margin-left: 15px;
 }

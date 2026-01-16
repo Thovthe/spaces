@@ -2,13 +2,10 @@
 <html>
 
 <head>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.3.0/css/font-awesome.min.css">
-    <link href='https://fonts.googleapis.com/css?family=Open+Sans:700,300,600,400' rel='stylesheet' type='text/css'>
     <title id='gsTitle'>Spaces</title>
-    <link type="text/css" href="css/style.css" rel="stylesheet">
-    </link>
-    <script type="text/javascript" src="js/spaces.js"></script>
-
+    <link rel="stylesheet" href="extResources/FontAwesome/css/font-awesome.css">
+    <link rel="stylesheet" type="text/css" href="css/style.css">
+    <script type="module" src="js/spaces.js"></script>
 </head>
 
 <body>
@@ -44,12 +41,13 @@
                     <span id="nameDisplay"></span>
                     <input type="text" placeholder="Name this space" />
                 </form>
-                <span id='actionSwitch' title="Switch to this space" class="button fa fa-arrow-circle-right"></span>
-                <span id='actionOpen' title="Open this space" class="button fa fa-external-link"></span>
+                <button id='actionSwitch' title="Switch to this space" class="button fa fa-arrow-circle-right"></button>
+                <button id='actionOpen' title="Open this space" class="button fa fa-external-link"></button>
                 <div class="buttonNav">
-                    <span id='actionEdit' title="Rename space" class="button fa fa-pencil"></span>
-                    <span id='actionExport' title="Export space" class="button fa fa-download"></span>
-                    <span id='actionDelete' title="Delete space" class="button fa fa-trash"></span>
+                    <button id='actionEdit' title="Rename space" class="button fa fa-pencil"></button>
+                    <button id='actionExport' title="Export space" class="button fa fa-download"></button>
+                    <button id='actionDelete' title="Delete space" class="button fa fa-trash"></button>
+                    <button id='actionClose' title="Close space" class="button fa fa-times-circle"></button>
                 </div>
             </div>
 
@@ -77,10 +75,9 @@
         <div class="blocker"></div>
         <div class="modal">
             <h2>Import a new space</h2>
-            <textarea id="importTextArea" spellcheck="false"
-                placeholder="Paste a list of line-separated urls or the contents of a spaces backup file" wrap="off"
-                rows="10"></textarea>
-            <a id="importBtn" class="button" href="#">Import</a>
+            <textarea id="importTextArea" spellcheck="false" rows="10" wrap="off"
+                placeholder="Paste a list of line-separated urls or the contents of a spaces backup file"></textarea>
+            <a id="importBtn" class="button imppaste" href="#">Import</a><label for="importFileBtn" class="button impfile">Import from File...</label><input id="importFileBtn" name="importFileBtn" type="file" accept=".json"/>
         </div>
 
     </div>

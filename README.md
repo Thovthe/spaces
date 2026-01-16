@@ -41,7 +41,7 @@ The chrome version was started by @deanoemcke and is currently maintained by @co
 
 Please note that the webstore version may be behind the latest.
 
-
+<br/>
 
 > **TODO** &mdash; add more sections
 > - [x] Tag first firefox release
