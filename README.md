@@ -1,3 +1,6 @@
+# This repository has moved to a new home, find it [on codeburg](https://codeberg.org/Thovthe/spaces).
+
+
 > **This is a GPL licensed fork of the "Spaces" chrome webextension that has ported it over to run on Firefox.**
 > @deanoemcke and @codedread amongst others retain copyright to most of the original source code and that code is covered by the original licenses. Any changes in this repo are provided under the terms of the GPLv2.
 > External resources are covered by their own licenses which are reproduced in the directories alongside their files.
@@ -26,12 +29,10 @@ Isn't this essentially just bookmarks with folders? Yeah, pretty much - but you'
 
 ## Install on FireFox
 
-Currently waiting to publish for general use but you can try it out temporarily by:
-1. Downloading the .zip of your desired version from the [releases](https://github.com/Thovthe/spaces/releases) page.
-2. Navigating to `about:debugging#/runtime/this-firefox`.
-3. Click `Load Temporary Add-on...`
-4. Then select your chosen .zip file and click `Open`
-5. **Remember** when installed this way the extension will disappear when you close all your FF windows. Be sure to backup your spaces.
+You can find Spaces on the [FireFox addons site](https://addons.mozilla.org/en-US/firefox/addon/spaces_firefox/).
+<br/>
+<br/>
+Navigate there in a FireFox based browser and click the install button to get the latest released version.
 
 ## Chrome Version
 
@@ -41,8 +42,6 @@ The chrome version was started by @deanoemcke and is currently maintained by @co
 
 Please note that the webstore version may be behind the latest.
 
+<br/>
 
-
-> **TODO** &mdash; add more sections
-> - [x] Tag first firefox release
-> - [ ] Build from github
+Check out the firefox port of spaces at it's new home [on codeburg](https://codeberg.org/Thovthe/spaces).
