@@ -1,9 +1,22 @@
 # This repository has moved to a new home, find it [on codeburg](https://codeberg.org/Thovthe/spaces).
 
 
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+<br/>
+
+
 > **This is a GPL licensed fork of the "Spaces" chrome webextension that has ported it over to run on Firefox.**
 > @deanoemcke and @codedread amongst others retain copyright to most of the original source code and that code is covered by the original licenses. Any changes in this repo are provided under the terms of the GPLv2.
 > External resources are covered by their own licenses which are reproduced in the directories alongside their files.
+
+<br/>
 
 # <img src="/img/icon48.png" align="absmiddle"> Spaces
 
